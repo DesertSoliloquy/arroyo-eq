@@ -60,6 +60,11 @@ target_link_libraries(ArroyoEQ
         juce::juce_recommended_lto_flags
         juce::juce_recommended_warning_flags)
 
+option(ARROYO_GENERIC_EDITOR "Diagnostic build: JUCE's generic editor instead of Arroyo's" OFF)
+if(ARROYO_GENERIC_EDITOR)
+    target_compile_definitions(ArroyoEQ PRIVATE ARROYO_GENERIC_EDITOR=1)
+endif()
+
 # Debug symbols in Release on Windows, so crash reports name functions.
 # (The .pdb is kept out of the distributed zip.)
 if(MSVC)

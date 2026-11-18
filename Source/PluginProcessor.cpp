@@ -37,6 +37,14 @@ juce::String msText (float v, int) { return juce::String (v, v < 10.0f ? 1 : 0) 
 const char* kCompIds[] = { "comp_on", "comp_thresh", "comp_ratio", "comp_knee", "comp_attack", "comp_release",
                            "comp_makeup", "comp_auto", "comp_mix", "comp_schpf", "comp_detector", "comp_position", "comp_link" };
 
+// On/off switches are two-step choice parameters ("Off"/"On"): unlike
+// juce::AudioParameterBool they snap a host's in-between value to a step, so a
+// restored state always comes back exactly as it was saved.
+std::unique_ptr<juce::AudioParameterChoice> onOff (const juce::String& id, const juce::String& name, bool on)
+{
+    return std::make_unique<juce::AudioParameterChoice> (juce::ParameterID { id, 1 }, name, juce::StringArray { "Off", "On" }, on ? 1 : 0);
+}
+
 float defaultBandFreq (int b)
 {
     // spread across the spectrum: 30 Hz .. 16 kHz
@@ -49,7 +57,7 @@ juce::AudioProcessorValueTreeState::ParameterLayout ArroyoProcessor::createLayou
     using namespace juce;
     AudioProcessorValueTreeState::ParameterLayout layout;
 
-    layout.add (std::make_unique<AudioParameterBool> (ParameterID { "eq_on", 1 }, "EQ On", true));
+    layout.add (onOff ("eq_on", "EQ On", true));
     layout.add (std::make_unique<AudioParameterFloat> (ParameterID { "out_gain", 1 }, "Output Gain",
         NormalisableRange<float> (-24.0f, 24.0f, 0.01f), 0.0f, AudioParameterFloatAttributes().withStringFromValueFunction (dbText)));
 
@@ -58,7 +66,7 @@ juce::AudioProcessorValueTreeState::ParameterLayout ArroyoProcessor::createLayou
         const String n = "Band " + String (b + 1) + " ";
         const int defType = b == 0 ? (int) BandType::LowCut : (b == kNumBands - 1 ? (int) BandType::HighCut : (int) BandType::Bell);
         auto group = std::make_unique<AudioProcessorParameterGroup> ("band" + String (b + 1), "Band " + String (b + 1), "|");
-        group->addChild (std::make_unique<AudioParameterBool> (ParameterID { ids::band (b, "on"), 1 }, n + "On", false));
+        group->addChild (onOff (ids::band (b, "on"), n + "On", false));
         group->addChild (std::make_unique<AudioParameterChoice> (ParameterID { ids::band (b, "type"), 1 }, n + "Type", bandTypeNames(), defType));
         group->addChild (std::make_unique<AudioParameterFloat> (ParameterID { ids::band (b, "freq"), 1 }, n + "Frequency",
             logRange (10.0f, 22000.0f), defaultBandFreq (b), AudioParameterFloatAttributes().withStringFromValueFunction (hzText)));
@@ -71,7 +79,7 @@ juce::AudioProcessorValueTreeState::ParameterLayout ArroyoProcessor::createLayou
     }
 
     auto comp = std::make_unique<AudioProcessorParameterGroup> ("comp", "Compressor", "|");
-    comp->addChild (std::make_unique<AudioParameterBool> (ParameterID { "comp_on", 1 }, "Comp On", false));
+    comp->addChild (onOff ("comp_on", "Comp On", false));
     comp->addChild (std::make_unique<AudioParameterFloat> (ParameterID { "comp_thresh", 1 }, "Threshold",
         NormalisableRange<float> (-60.0f, 0.0f, 0.01f), -18.0f, AudioParameterFloatAttributes().withStringFromValueFunction (dbText)));
     comp->addChild (std::make_unique<AudioParameterFloat> (ParameterID { "comp_ratio", 1 }, "Ratio",
@@ -85,7 +93,7 @@ juce::AudioProcessorValueTreeState::ParameterLayout ArroyoProcessor::createLayou
         logRange (5.0f, 2000.0f), 120.0f, AudioParameterFloatAttributes().withStringFromValueFunction (msText)));
     comp->addChild (std::make_unique<AudioParameterFloat> (ParameterID { "comp_makeup", 1 }, "Makeup",
         NormalisableRange<float> (0.0f, 24.0f, 0.01f), 0.0f, AudioParameterFloatAttributes().withStringFromValueFunction (dbText)));
-    comp->addChild (std::make_unique<AudioParameterBool> (ParameterID { "comp_auto", 1 }, "Auto Makeup", false));
+    comp->addChild (onOff ("comp_auto", "Auto Makeup", false));
     comp->addChild (std::make_unique<AudioParameterFloat> (ParameterID { "comp_mix", 1 }, "Mix",
         NormalisableRange<float> (0.0f, 100.0f, 0.1f), 100.0f,
         AudioParameterFloatAttributes().withStringFromValueFunction ([] (float v, int) { return juce::String (v, 0) + " %"; })));
@@ -94,7 +102,7 @@ juce::AudioProcessorValueTreeState::ParameterLayout ArroyoProcessor::createLayou
         AudioParameterFloatAttributes().withStringFromValueFunction ([] (float v, int) { return v <= 20.5f ? juce::String ("Off") : hzText (v, 0); })));
     comp->addChild (std::make_unique<AudioParameterChoice> (ParameterID { "comp_detector", 1 }, "Detector", StringArray { "Peak", "RMS" }, 0));
     comp->addChild (std::make_unique<AudioParameterChoice> (ParameterID { "comp_position", 1 }, "Comp Position", StringArray { "After EQ", "Before EQ" }, 0));
-    comp->addChild (std::make_unique<AudioParameterBool> (ParameterID { "comp_link", 1 }, "Stereo Link", true));
+    comp->addChild (onOff ("comp_link", "Stereo Link", true));
     layout.add (std::move (comp));
     return layout;
 }
@@ -270,7 +278,14 @@ void ArroyoProcessor::setStateInformation (const void* data, int size)
             apvts.replaceState (juce::ValueTree::fromXml (*xml));
 }
 
-juce::AudioProcessorEditor* ArroyoProcessor::createEditor() { return new ArroyoEditor (*this); }
+juce::AudioProcessorEditor* ArroyoProcessor::createEditor()
+{
+   #if ARROYO_GENERIC_EDITOR // diagnostic build only
+    return new juce::GenericAudioProcessorEditor (*this);
+   #else
+    return new ArroyoEditor (*this);
+   #endif
+}
 
 #if ! ARROYO_NO_PLUGIN_ENTRY
 juce::AudioProcessor* JUCE_CALLTYPE createPluginFilter() { return new ArroyoProcessor(); }

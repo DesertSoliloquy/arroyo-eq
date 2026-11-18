@@ -26,7 +26,7 @@ jobs:
       - uses: actions/checkout@v4
 
       - name: Configure
-        run: cmake -B build -A x64 -DARROYO_BUILD_SNAPSHOT=ON
+        run: cmake -B build -A x64
 
       - name: Build VST3
         run: cmake --build build --config Release --target ArroyoEQ_VST3 --parallel
@@ -38,31 +38,43 @@ jobs:
           Expand-Archive pluginval.zip -DestinationPath pluginval
 
       # ---- diagnostics (report only; they do not block the build) ----
-      - name: "Diagnostic: pluginval 2.0 beta 2 (prints a backtrace on crash)"
+      - name: "Diagnostic: pluginval under the Windows debugger (cdb)"
         continue-on-error: true
         shell: pwsh
         run: |
-          Invoke-WebRequest https://github.com/Tracktion/pluginval/releases/download/v2.0.0-beta2/pluginval_Windows.zip -OutFile pv2.zip
-          Expand-Archive pv2.zip -DestinationPath pv2
-          .\pv2\pluginval.exe --strictness-level 10 --verbose --timeout-ms 300000 "build\ArroyoEQ_artefacts\Release\VST3\Arroyo EQ.vst3"
-          if ($LASTEXITCODE -ne 0) { exit 1 }
+          $cdb = Get-ChildItem -Recurse "${env:ProgramFiles(x86)}\Windows Kits\10\Debuggers" -Filter cdb.exe -ErrorAction SilentlyContinue |
+                 Where-Object { $_.FullName -match '\\x64\\' } | Select-Object -First 1
+          if (-not $cdb) { Write-Host "cdb not found on this runner"; exit 0 }
+          Write-Host "Using $($cdb.FullName)"
+          $plugin = "build\ArroyoEQ_artefacts\Release\VST3\Arroyo EQ.vst3"
+          $sym = "srv*C:\symcache*https://msdl.microsoft.com/download/symbols;" + (Resolve-Path build).Path
+          # Break on access violations, stack overflow, heap corruption and
+          # fail-fast; print the faulting stack, then quit.
+          $cmds = 'sxe -c ".echo ===== EXCEPTION =====;.lastevent;.ecxr;kp 80;q" av;' +
+                  'sxe -c ".echo ===== STACK OVERFLOW =====;.lastevent;kp 200;q" sov;' +
+                  'sxe -c ".echo ===== HEAP CORRUPTION =====;.lastevent;kp 80;q" c0000374;' +
+                  'sxe -c ".echo ===== FAIL FAST =====;.lastevent;kp 80;q" c0000409;' +
+                  'g'
+          & $cdb.FullName -G -lines -y $sym -c $cmds .\pluginval\pluginval.exe --strictness-level 10 --validate-in-process --timeout-ms 300000 $plugin
+          Write-Host "debugger session exit code: $LASTEXITCODE"
 
-      - name: "Diagnostic: editor stress test on Windows"
+      - name: "Diagnostic: control build with JUCE's generic editor"
         continue-on-error: true
         shell: pwsh
         run: |
-          cmake --build build --config Release --target ArroyoStress --parallel
-          $exe = Get-ChildItem -Recurse build -Filter ArroyoStress.exe | Select-Object -First 1
-          & $exe.FullName background 1000; $a = $LASTEXITCODE
-          & $exe.FullName message 1000; $b = $LASTEXITCODE
-          if ($a -ne 0 -or $b -ne 0) { exit 1 }
+          cmake -B build-generic -A x64 -DARROYO_GENERIC_EDITOR=ON
+          cmake --build build-generic --config Release --target ArroyoEQ_VST3 --parallel
+          .\pluginval\pluginval.exe --strictness-level 10 --validate-in-process --timeout-ms 300000 "build-generic\ArroyoEQ_artefacts\Release\VST3\Arroyo EQ.vst3"
+          Write-Host ("generic-editor pluginval exit code: {0} (0x{0:X8})" -f $LASTEXITCODE)
 
       - name: Validate with pluginval (strictness 10)
         shell: pwsh
         run: |
           New-Item -ItemType Directory -Force -Path pv-log | Out-Null
           .\pluginval\pluginval.exe --strictness-level 10 --verbose --timeout-ms 300000 --output-dir pv-log "build\ArroyoEQ_artefacts\Release\VST3\Arroyo EQ.vst3"
-          if ($LASTEXITCODE -ne 0) { exit 1 }
+          $code = $LASTEXITCODE
+          Write-Host ("pluginval exit code: {0} (0x{0:X8})" -f $code)
+          if ($code -ne 0) { exit 1 }
 
       - name: Upload pluginval log and symbols
         if: always()
