@@ -7,8 +7,16 @@
 #include <juce_gui_extra/juce_gui_extra.h>
 #include <thread>
 
+static void onCrash (void*)
+{
+    std::printf ("\n*** CRASH in ArroyoStress. Backtrace:\n%s\n", juce::SystemStats::getStackBacktrace().toRawUTF8());
+    std::fflush (stdout);
+    std::_Exit (3);
+}
+
 int main (int argc, char** argv)
 {
+    juce::SystemStats::setApplicationCrashHandler (onCrash);
     juce::ScopedJuceInitialiser_GUI init;
     const bool fromMessageThread = argc > 1 && juce::String (argv[1]) == "message";
     const int iterations = argc > 2 ? juce::String (argv[2]).getIntValue() : 1000;
@@ -18,6 +26,9 @@ int main (int argc, char** argv)
     p.prepareToPlay (44100.0, 512);
 
     std::unique_ptr<juce::AudioProcessorEditor> ed (p.createEditor());
+   #if JUCE_WINDOWS
+    ed->addToDesktop (0); // real window, real Direct2D rendering
+   #endif
     ed->setVisible (true);
     // No window manager on the virtual display: repaint the editor into an
     // image ~30x per second instead, exercising every paint() path.

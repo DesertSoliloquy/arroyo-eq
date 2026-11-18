@@ -95,4 +95,8 @@ if(ARROYO_BUILD_SNAPSHOT)
     target_link_libraries(ArroyoStress PRIVATE
         juce::juce_audio_utils juce::juce_dsp juce::juce_gui_extra
         juce::juce_recommended_config_flags)
+    if(MSVC)
+        target_compile_options(ArroyoStress PRIVATE /Zi)
+        target_link_options(ArroyoStress PRIVATE /DEBUG)
+    endif()
 endif()
