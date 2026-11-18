@@ -60,6 +60,13 @@ target_link_libraries(ArroyoEQ
         juce::juce_recommended_lto_flags
         juce::juce_recommended_warning_flags)
 
+# Debug symbols in Release on Windows, so crash reports name functions.
+# (The .pdb is kept out of the distributed zip.)
+if(MSVC)
+    target_compile_options(ArroyoEQ PRIVATE /Zi)
+    target_link_options(ArroyoEQ PRIVATE /DEBUG /OPT:REF /OPT:ICF)
+endif()
+
 # Headless screenshot tool (development only)
 option(ARROYO_BUILD_SNAPSHOT "Build the GUI snapshot tool" OFF)
 if(ARROYO_BUILD_SNAPSHOT)
@@ -73,6 +80,19 @@ if(ARROYO_BUILD_SNAPSHOT)
     target_compile_definitions(ArroyoSnapshot PRIVATE
         JUCE_WEB_BROWSER=0 JUCE_USE_CURL=0 ARROYO_NO_PLUGIN_ENTRY=1)
     target_link_libraries(ArroyoSnapshot PRIVATE
+        juce::juce_audio_utils juce::juce_dsp juce::juce_gui_extra
+        juce::juce_recommended_config_flags)
+
+    juce_add_console_app(ArroyoStress PRODUCT_NAME "ArroyoStress")
+    target_sources(ArroyoStress PRIVATE
+        tools/Stress.cpp
+        Source/PluginProcessor.cpp
+        Source/PluginEditor.cpp
+        Source/gui/CurveDisplay.cpp)
+    target_include_directories(ArroyoStress PRIVATE Source)
+    target_compile_definitions(ArroyoStress PRIVATE
+        JUCE_WEB_BROWSER=0 JUCE_USE_CURL=0 ARROYO_NO_PLUGIN_ENTRY=1 JUCE_MODAL_LOOPS_PERMITTED=1)
+    target_link_libraries(ArroyoStress PRIVATE
         juce::juce_audio_utils juce::juce_dsp juce::juce_gui_extra
         juce::juce_recommended_config_flags)
 endif()
