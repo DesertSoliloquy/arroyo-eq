@@ -1,6 +1,6 @@
 # Arroyo EQ
 
-A free 16-band parametric EQ with a draggable curve, a live spectrum analyzer
+A 16-band parametric EQ with a draggable curve, a live spectrum analyzer
 and a built-in compressor. VST3 for Windows (tested for MPC 3 desktop).
 
 No accounts, no registration, no internet connection, no telemetry. It never
