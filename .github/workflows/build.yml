@@ -6,9 +6,6 @@ on:
     tags: [ 'v*' ]
   workflow_dispatch:
 
-env:
-  PLUGINVAL_URL: https://github.com/Tracktion/pluginval/releases/download/v1.0.4/pluginval_Windows.zip
-
 jobs:
   dsp-tests:
     runs-on: ubuntu-latest
@@ -31,59 +28,31 @@ jobs:
       - name: Build VST3
         run: cmake --build build --config Release --target ArroyoEQ_VST3 --parallel
 
-      - name: Get pluginval 1.0.4
+      - name: Get pluginval 1.0.4 and 2.0 beta 2
         shell: pwsh
         run: |
-          Invoke-WebRequest $env:PLUGINVAL_URL -OutFile pluginval.zip
-          Expand-Archive pluginval.zip -DestinationPath pluginval
+          Invoke-WebRequest https://github.com/Tracktion/pluginval/releases/download/v1.0.4/pluginval_Windows.zip -OutFile pv1.zip
+          Expand-Archive pv1.zip -DestinationPath pv1
+          Invoke-WebRequest https://github.com/Tracktion/pluginval/releases/download/v2.0.0-beta2/pluginval_Windows.zip -OutFile pv2.zip
+          Expand-Archive pv2.zip -DestinationPath pv2
 
-      # ---- diagnostics (report only; they do not block the build) ----
-      - name: "Diagnostic: pluginval under the Windows debugger (cdb)"
-        continue-on-error: true
-        shell: pwsh
-        run: |
-          $cdb = Get-ChildItem -Recurse "${env:ProgramFiles(x86)}\Windows Kits\10\Debuggers" -Filter cdb.exe -ErrorAction SilentlyContinue |
-                 Where-Object { $_.FullName -match '\\x64\\' } | Select-Object -First 1
-          if (-not $cdb) { Write-Host "cdb not found on this runner"; exit 0 }
-          Write-Host "Using $($cdb.FullName)"
-          $plugin = "build\ArroyoEQ_artefacts\Release\VST3\Arroyo EQ.vst3"
-          $sym = "srv*C:\symcache*https://msdl.microsoft.com/download/symbols;" + (Resolve-Path build).Path
-          # Break on access violations, stack overflow, heap corruption and
-          # fail-fast; print the faulting stack, then quit.
-          $cmds = 'sxe -c ".echo ===== EXCEPTION =====;.lastevent;.ecxr;kp 80;q" av;' +
-                  'sxe -c ".echo ===== STACK OVERFLOW =====;.lastevent;kp 200;q" sov;' +
-                  'sxe -c ".echo ===== HEAP CORRUPTION =====;.lastevent;kp 80;q" c0000374;' +
-                  'sxe -c ".echo ===== FAIL FAST =====;.lastevent;kp 80;q" c0000409;' +
-                  'g'
-          & $cdb.FullName -G -lines -y $sym -c $cmds .\pluginval\pluginval.exe --strictness-level 10 --validate-in-process --timeout-ms 300000 $plugin
-          Write-Host "debugger session exit code: $LASTEXITCODE"
+      # pluginval is a Windows GUI-subsystem program: PowerShell does not wait
+      # for those, so it is run from cmd, which does wait and passes on the
+      # exit code.
+      - name: Validate with pluginval 1.0.4 (strictness 10)
+        shell: cmd
+        run: pv1\pluginval.exe --strictness-level 10 --validate-in-process --timeout-ms 300000 --output-dir pv-log "build\ArroyoEQ_artefacts\Release\VST3\Arroyo EQ.vst3"
 
-      - name: "Diagnostic: control build with JUCE's generic editor"
-        continue-on-error: true
-        shell: pwsh
-        run: |
-          cmake -B build-generic -A x64 -DARROYO_GENERIC_EDITOR=ON
-          cmake --build build-generic --config Release --target ArroyoEQ_VST3 --parallel
-          .\pluginval\pluginval.exe --strictness-level 10 --validate-in-process --timeout-ms 300000 "build-generic\ArroyoEQ_artefacts\Release\VST3\Arroyo EQ.vst3"
-          Write-Host ("generic-editor pluginval exit code: {0} (0x{0:X8})" -f $LASTEXITCODE)
+      - name: Validate with pluginval 2.0 beta 2 (strictness 10, includes Steinberg's validator)
+        shell: cmd
+        run: pv2\pluginval.exe --strictness-level 10 --timeout-ms 300000 --output-dir pv-log "build\ArroyoEQ_artefacts\Release\VST3\Arroyo EQ.vst3"
 
-      - name: Validate with pluginval (strictness 10)
-        shell: pwsh
-        run: |
-          New-Item -ItemType Directory -Force -Path pv-log | Out-Null
-          .\pluginval\pluginval.exe --strictness-level 10 --verbose --timeout-ms 300000 --output-dir pv-log "build\ArroyoEQ_artefacts\Release\VST3\Arroyo EQ.vst3"
-          $code = $LASTEXITCODE
-          Write-Host ("pluginval exit code: {0} (0x{0:X8})" -f $code)
-          if ($code -ne 0) { exit 1 }
-
-      - name: Upload pluginval log and symbols
-        if: always()
+      - name: Upload pluginval logs (on failure)
+        if: failure()
         uses: actions/upload-artifact@v4
         with:
-          name: diagnostics
-          path: |
-            pv-log
-            build/**/*.pdb
+          name: pluginval-logs
+          path: pv-log
 
       - name: Package
         shell: pwsh
